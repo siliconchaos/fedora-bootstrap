@@ -1,0 +1,309 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Bootstrap Fedora workstation/dev environment
+# Idempotent: safe to run multiple times
+
+# Config
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+ROOT_DIR="$SCRIPT_DIR"
+CONF_FILE="${ROOT_DIR}/config/bootstrap.conf"
+
+# Defaults (can be overridden in bootstrap.conf)
+HEADLESS=${HEADLESS:-false}
+ENABLE_RUST=${ENABLE_RUST:-false}
+ENABLE_FLATPAK=${ENABLE_FLATPAK:-true}
+EXTRA_PACKAGES=("${EXTRA_PACKAGES[@]:-}")
+INSTALL_DOTFILES=${INSTALL_DOTFILES:-false}
+DOTFILES_INSTALL_PATH=${DOTFILES_INSTALL_PATH:-}
+
+log() { printf "[%s] %s\n" "$(date +%H:%M:%S)" "$*"; }
+warn() { printf "[WARN] %s\n" "$*" >&2; }
+
+run_sudo() {
+  if [[ $EUID -ne 0 ]]; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
+
+load_conf() {
+  if [[ -f "$CONF_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$CONF_FILE"
+  fi
+}
+
+ensure_fedora() {
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    if [[ "${ID:-}" != fedora ]]; then
+      warn "This script targets Fedora; detected ${PRETTY_NAME:-${ID:-unknown}}"
+      exit 1
+    fi
+  else
+    warn "Cannot determine OS; /etc/os-release missing."
+    exit 1
+  fi
+}
+
+enable_rpmfusion() {
+  local ver
+  ver=$(rpm -E %fedora)
+  local free_pkg="rpmfusion-free-release-${ver}.noarch"
+  local nonfree_pkg="rpmfusion-nonfree-release-${ver}.noarch"
+  if rpm -q "$free_pkg" "$nonfree_pkg" >/dev/null 2>&1; then
+    log "RPM Fusion already enabled"
+    return 0
+  fi
+  log "Enabling RPM Fusion (free + nonfree)"
+  run_sudo dnf install -y \
+    "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${ver}.noarch.rpm" \
+    "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${ver}.noarch.rpm"
+}
+
+is_container() {
+  # Detect if we're running in a container
+  [[ -f /.dockerenv ]] || [[ -n "${container:-}" ]] || grep -q container=lxc /proc/1/environ 2>/dev/null || [[ "$(systemd-detect-virt 2>/dev/null)" != "none" ]]
+}
+
+enable_flathub() {
+  # Skip if disabled in config
+  if [[ "$ENABLE_FLATPAK" != true ]]; then
+    log "Flatpak disabled (set ENABLE_FLATPAK=true to enable)"
+    return 0
+  fi
+  
+  # Skip Flatpak setup in containers as it typically won't work properly
+  if is_container; then
+    log "Container environment detected; skipping Flatpak setup"
+    return 0
+  fi
+  
+  # Install flatpak if not present
+  if ! command -v flatpak >/dev/null 2>&1; then
+    log "Installing flatpak"
+    run_sudo dnf install -y flatpak || { warn "Failed to install flatpak"; return 0; }
+  fi
+  
+  if flatpak remote-list | awk '{print $1}' | grep -qx flathub; then
+    log "Flathub already enabled"
+    return 0
+  fi
+  
+  log "Enabling Flathub"
+  flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+}
+
+create_local_bin() {
+  log "Ensuring ~/.local/bin exists and is in PATH"
+  mkdir -p "$HOME/.local/bin"
+  # Add to ~/.bash_profile and ~/.zprofile if absent
+  local export_line="export PATH=\"\$HOME/.local/bin:\$PATH\""
+  grep -Fq "$export_line" "$HOME/.bash_profile" 2>/dev/null || echo "$export_line" >> "$HOME/.bash_profile"
+  grep -Fq "$export_line" "$HOME/.zprofile" 2>/dev/null || echo "$export_line" >> "$HOME/.zprofile"
+}
+
+install_dev_tools_group() {
+  log "Installing development-tools group (if needed)"
+  if dnf group list --installed | grep -qi "development tools"; then
+    log "development-tools already installed"
+    return 0
+  fi
+  run_sudo dnf group install -y 'development-tools'
+}
+
+install_copr_and_extra() {
+  # COPR: lazygit, yazi
+  log "Ensuring COPR repos for lazygit and yazi"
+  if ! command -v dnf >/dev/null 2>&1; then
+    warn "dnf not found; skipping COPR setup"
+    return 0
+  fi
+  
+  # Install COPR plugin if not available
+  if ! dnf copr --help >/dev/null 2>&1; then
+    log "Installing dnf-plugins-core for COPR support"
+    run_sudo dnf install -y dnf-plugins-core || { warn "Failed to install COPR plugin"; return 0; }
+  fi
+  # lazygit
+  if ! command -v lazygit >/dev/null 2>&1; then
+    run_sudo dnf -y copr enable dejan/lazygit || warn "Could not enable COPR dejan/lazygit"
+  fi
+  # yazi
+  if ! command -v yazi >/dev/null 2>&1; then
+    run_sudo dnf -y copr enable varlad/yazi || warn "Could not enable COPR varlad/yazi"
+  fi
+}
+
+install_packages() {
+  if ! command -v dnf >/dev/null 2>&1; then
+    warn "dnf not found; cannot install packages"
+    return 0
+  fi
+  # Base package list
+  local pkgs=(
+    ansible awscli2 bash-completion bat btop detox dnf-utils duf fastfetch fd-find fzf glow gum helm jq
+    kubernetes-client moreutils ncompress neovim onefetch p7zip p7zip-plugins PackageKit-command-not-found
+    swaks tealdeer tmux unrar uv wget yq zoxide zsh k9s dnfdragora
+    git curl ripgrep tree-sitter-cli helix lazygit yazi ouch
+  )
+  # Merge EXTRA_PACKAGES
+  pkgs+=("${EXTRA_PACKAGES[@]:-}")
+  # Install missing packages
+  local to_install=()
+  for p in "${pkgs[@]}"; do
+    rpm -q "$p" >/dev/null 2>&1 || to_install+=("$p")
+  done
+  if ((${#to_install[@]}==0)); then
+    log "All packages already installed"
+  else
+    log "Installing ${#to_install[@]} packages via dnf"
+    run_sudo dnf install -y "${to_install[@]}"
+  fi
+}
+
+# Flatpak apps can be installed manually as needed:
+# flatpak install flathub com.google.Chrome
+# flatpak install flathub org.mozilla.firefox
+# flatpak install flathub com.spotify.Client
+
+install_rust_and_cargo_tools() {
+  [[ "$ENABLE_RUST" == true ]] || { log "Rust installation disabled (set ENABLE_RUST=true to enable)"; return 0; }
+  
+  # Install Rust if not available
+  if ! command -v cargo >/dev/null 2>&1; then
+    log "Installing Rust toolchain via rustup"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    # shellcheck disable=SC1090
+    # shellcheck disable=SC1091
+    source "$HOME/.cargo/env"
+  fi
+}
+
+install_dra() {
+  # Install dra (Download Release Assets) - foundational tool for GitHub releases
+  if ! command -v dra >/dev/null 2>&1; then
+    log "Installing dra (Download Release Assets)"
+    curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/devmatteini/dra/refs/heads/main/install.sh | bash -s -- --to ~/.local/bin || warn "Failed to install dra"
+  fi
+}
+
+install_dra_tools() {
+  # Install tools from GitHub releases using dra
+  if ! command -v dra >/dev/null 2>&1; then
+    warn "dra not available; skipping dra-based tools installation"
+    return 0
+  fi
+  
+  # Install eza using dra (much faster than cargo)
+  if ! command -v eza >/dev/null 2>&1; then
+    log "Installing eza via dra"
+    dra download --install --output ~/.local/bin -a eza-community/eza || warn "Failed to install eza via dra"
+  fi
+  
+  # Install starship using dra
+  if ! command -v starship >/dev/null 2>&1; then
+    log "Installing starship via dra"
+    dra download --install --output ~/.local/bin -a starship/starship || warn "Failed to install starship via dra"
+  fi
+}
+
+setup_lazyvim() {
+  # Only if not already configured
+  local nvconf="$HOME/.config/nvim"
+  if [[ -d "$nvconf" && -f "$nvconf/init.lua" ]]; then
+    log "Neovim config already present; skipping LazyVim clone"
+    return 0
+  fi
+  log "Setting up LazyVim starter"
+  git clone https://github.com/LazyVim/starter "$nvconf"
+  rm -rf "$nvconf/.git"
+}
+
+install_dotfiles_from_path() {
+  if [[ "$INSTALL_DOTFILES" != true ]]; then
+    log "Dotfiles install disabled"
+    return 2
+  fi
+
+  if [[ -z "$DOTFILES_INSTALL_PATH" ]]; then
+    warn "DOTFILES_INSTALL_PATH not set; skipping dotfiles install"
+    return 1
+  fi
+
+  if [[ ! -d "$DOTFILES_INSTALL_PATH" ]]; then
+    warn "Dotfiles path '$DOTFILES_INSTALL_PATH' not found; skipping dotfiles install"
+    return 1
+  fi
+
+  local install_script="$DOTFILES_INSTALL_PATH/install.sh"
+  if [[ ! -f "$install_script" ]]; then
+    warn "Dotfiles install script not found at $install_script; skipping dotfiles install"
+    return 1
+  fi
+
+  log "Running dotfiles installer from $DOTFILES_INSTALL_PATH"
+  if ! (cd "$DOTFILES_INSTALL_PATH" && bash ./install.sh); then
+    warn "Dotfiles installer reported failure"
+    return 1
+  fi
+
+  return 0
+}
+
+change_default_shell_to_zsh() {
+  if [[ "$SHELL" == *"zsh"* ]]; then
+    log "Default shell already zsh"
+    return 0
+  fi
+  if command -v zsh >/dev/null 2>&1; then
+    local zsh_path
+    zsh_path="$(command -v zsh)"
+    log "Changing default shell to $zsh_path"
+    run_sudo chsh -s "$zsh_path" "$USER" || warn "Could not change default shell"
+  else
+    warn "zsh not found; skipping chsh"
+  fi
+}
+
+setup_gnome_tools() {
+  $HEADLESS && { log "HEADLESS=true; skipping GNOME tools"; return 0; }
+  run_sudo dnf install -y gnome-extensions-app gnome-tweaks || warn "Failed installing GNOME tools"
+}
+
+main() {
+  ensure_fedora
+  load_conf
+  create_local_bin
+  enable_rpmfusion
+  enable_flathub
+  install_copr_and_extra
+  install_dev_tools_group
+  install_packages
+  install_dra
+  install_dra_tools
+  install_rust_and_cargo_tools
+  setup_lazyvim
+  local dotfiles_status
+  if install_dotfiles_from_path; then
+    dotfiles_status=0
+  else
+    dotfiles_status=$?
+  fi
+
+  if [[ "$dotfiles_status" -eq 0 ]]; then
+    change_default_shell_to_zsh
+  elif [[ "$dotfiles_status" -eq 2 ]]; then
+    log "Default shell left unchanged (dotfiles install skipped)"
+  else
+    warn "Skipping default shell change because dotfiles install did not run"
+  fi
+  setup_gnome_tools
+  log "Bootstrap complete. You may need to log out/in for some changes to take effect."
+}
+
+main "$@"

@@ -1,0 +1,20 @@
+# Bootstrap configuration
+# Copy this to bootstrap.conf and modify as needed
+
+# Set to false to skip Flatpak setup (useful in containers)
+# ENABLE_FLATPAK=false
+
+# Set to true to skip GUI applications and GNOME setup
+# HEADLESS=true
+
+# Set to true to install Rust toolchain and cargo tools
+# ENABLE_RUST=true
+
+# Set to true to run dotfiles installer located at DOTFILES_INSTALL_PATH
+# INSTALL_DOTFILES=true
+
+# Absolute path to dotfiles directory containing install.sh
+# DOTFILES_INSTALL_PATH="$HOME/silentcastle/projects/dot_zshrc"
+
+# Additional packages to install via dnf
+# EXTRA_PACKAGES=(package1 package2 package3)
