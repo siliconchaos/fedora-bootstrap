@@ -28,7 +28,6 @@ run_sudo() {
   fi
 }
 
-
 load_conf() {
   if [[ -f "$CONF_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -76,24 +75,27 @@ enable_flathub() {
     log "Flatpak disabled (set ENABLE_FLATPAK=true to enable)"
     return 0
   fi
-  
+
   # Skip Flatpak setup in containers as it typically won't work properly
   if is_container; then
     log "Container environment detected; skipping Flatpak setup"
     return 0
   fi
-  
+
   # Install flatpak if not present
   if ! command -v flatpak >/dev/null 2>&1; then
     log "Installing flatpak"
-    run_sudo dnf install -y flatpak || { warn "Failed to install flatpak"; return 0; }
+    run_sudo dnf install -y flatpak || {
+      warn "Failed to install flatpak"
+      return 0
+    }
   fi
-  
+
   if flatpak remote-list | awk '{print $1}' | grep -qx flathub; then
     log "Flathub already enabled"
     return 0
   fi
-  
+
   log "Enabling Flathub"
   flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 }
@@ -103,8 +105,8 @@ create_local_bin() {
   mkdir -p "$HOME/.local/bin"
   # Add to ~/.bash_profile and ~/.zprofile if absent
   local export_line="export PATH=\"\$HOME/.local/bin:\$PATH\""
-  grep -Fq "$export_line" "$HOME/.bash_profile" 2>/dev/null || echo "$export_line" >> "$HOME/.bash_profile"
-  grep -Fq "$export_line" "$HOME/.zprofile" 2>/dev/null || echo "$export_line" >> "$HOME/.zprofile"
+  grep -Fq "$export_line" "$HOME/.bash_profile" 2>/dev/null || echo "$export_line" >>"$HOME/.bash_profile"
+  grep -Fq "$export_line" "$HOME/.zprofile" 2>/dev/null || echo "$export_line" >>"$HOME/.zprofile"
 }
 
 install_dev_tools_group() {
@@ -123,11 +125,14 @@ install_copr_and_extra() {
     warn "dnf not found; skipping COPR setup"
     return 0
   fi
-  
+
   # Install COPR plugin if not available
   if ! dnf copr --help >/dev/null 2>&1; then
     log "Installing dnf-plugins-core for COPR support"
-    run_sudo dnf install -y dnf-plugins-core || { warn "Failed to install COPR plugin"; return 0; }
+    run_sudo dnf install -y dnf-plugins-core || {
+      warn "Failed to install COPR plugin"
+      return 0
+    }
   fi
   # lazygit
   if ! command -v lazygit >/dev/null 2>&1; then
@@ -146,7 +151,7 @@ install_packages() {
   fi
   # Base package list
   local pkgs=(
-    ansible awscli2 bash-completion bat btop detox dnf-utils duf fastfetch fd-find fzf glow gum helm jq
+    ansible awk awscli2 bash-completion bat btop detox dnf-utils duf fastfetch fd-find fzf glow gum helm jq
     kubernetes-client moreutils ncompress neovim onefetch p7zip p7zip-plugins PackageKit-command-not-found
     swaks tealdeer tmux unrar uv wget yq zoxide zsh k9s dnfdragora
     git curl ripgrep tree-sitter-cli helix lazygit yazi ouch
@@ -158,11 +163,12 @@ install_packages() {
   for p in "${pkgs[@]}"; do
     rpm -q "$p" >/dev/null 2>&1 || to_install+=("$p")
   done
-  if ((${#to_install[@]}==0)); then
+  if ((${#to_install[@]} == 0)); then
     log "All packages already installed"
   else
     log "Installing ${#to_install[@]} packages via dnf"
-    run_sudo dnf install -y "${to_install[@]}"
+    # Use --skip-unavailable for cross-version compatibility (e.g., wget conflict on Fedora 43)
+    run_sudo dnf install -y --skip-unavailable "${to_install[@]}"
   fi
 }
 
@@ -172,8 +178,11 @@ install_packages() {
 # flatpak install flathub com.spotify.Client
 
 install_rust_and_cargo_tools() {
-  [[ "$ENABLE_RUST" == true ]] || { log "Rust installation disabled (set ENABLE_RUST=true to enable)"; return 0; }
-  
+  [[ "$ENABLE_RUST" == true ]] || {
+    log "Rust installation disabled (set ENABLE_RUST=true to enable)"
+    return 0
+  }
+
   # Install Rust if not available
   if ! command -v cargo >/dev/null 2>&1; then
     log "Installing Rust toolchain via rustup"
@@ -198,13 +207,13 @@ install_dra_tools() {
     warn "dra not available; skipping dra-based tools installation"
     return 0
   fi
-  
+
   # Install eza using dra (much faster than cargo)
   if ! command -v eza >/dev/null 2>&1; then
     log "Installing eza via dra"
     dra download --install --output ~/.local/bin -a eza-community/eza || warn "Failed to install eza via dra"
   fi
-  
+
   # Install starship using dra
   if ! command -v starship >/dev/null 2>&1; then
     log "Installing starship via dra"
@@ -271,7 +280,10 @@ change_default_shell_to_zsh() {
 }
 
 setup_gnome_tools() {
-  $HEADLESS && { log "HEADLESS=true; skipping GNOME tools"; return 0; }
+  $HEADLESS && {
+    log "HEADLESS=true; skipping GNOME tools"
+    return 0
+  }
   run_sudo dnf install -y gnome-extensions-app gnome-tweaks || warn "Failed installing GNOME tools"
 }
 
