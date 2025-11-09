@@ -223,7 +223,21 @@ install_dra_tools() {
 
 install_broot() {
   local broot_bin="$HOME/.local/bin/broot"
-  local broot_url="https://dystroy.org/broot/download/x86_64-linux/broot"
+  local broot_url=""
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64)
+      broot_url="https://dystroy.org/broot/download/x86_64-linux/broot"
+      ;;
+    aarch64 | arm64)
+      broot_url="https://dystroy.org/broot/download/aarch64-linux-android/broot"
+      ;;
+    *)
+      warn "Unsupported architecture '$arch' for broot install"
+      return 1
+      ;;
+  esac
 
   if [[ ! -x "$broot_bin" ]]; then
     log "Installing broot to $broot_bin"
