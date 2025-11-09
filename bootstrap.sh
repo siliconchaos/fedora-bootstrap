@@ -221,6 +221,35 @@ install_dra_tools() {
   fi
 }
 
+setup_helix_config() {
+  local hx_dir="$HOME/.config/helix"
+  local hx_conf="$hx_dir/config.toml"
+
+  if [[ -f "$hx_conf" ]]; then
+    log "Helix config already exists; leaving as-is"
+    return 0
+  fi
+
+  log "Installing default Helix config to ${hx_conf#$HOME/}"
+  mkdir -p "$hx_dir"
+  cat <<'EOF' >"$hx_conf"
+theme = "tokyonight"
+
+[editor]
+true-color = true
+bufferline = "always"
+line-number = "relative"
+
+[editor.cursor-shape]
+insert = "bar"
+normal = "block"
+select = "underline"
+
+[editor.file-picker]
+hidden = false
+EOF
+}
+
 install_broot() {
   local broot_bin="$HOME/.local/bin/broot"
   local broot_url=""
@@ -367,6 +396,7 @@ main() {
   install_copr_and_extra
   install_dev_tools_group
   install_packages
+  setup_helix_config
   install_dra
   install_dra_tools
   install_rust_and_cargo_tools
