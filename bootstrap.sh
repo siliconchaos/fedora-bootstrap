@@ -186,10 +186,18 @@ install_rust_and_cargo_tools() {
   # Install Rust if not available
   if ! command -v cargo >/dev/null 2>&1; then
     log "Installing Rust toolchain via rustup"
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    if ! curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y; then
+      warn "Failed to install Rust"
+      return 0
+    fi
     # shellcheck disable=SC1090
     # shellcheck disable=SC1091
-    source "$HOME/.cargo/env"
+    if [[ -f "$HOME/.cargo/env" ]]; then
+      source "$HOME/.cargo/env"
+    else
+      warn "Rust installed but environment file not found"
+      return 0
+    fi
   fi
 }
 
@@ -260,7 +268,7 @@ install_broot() {
       broot_url="https://dystroy.org/broot/download/x86_64-linux/broot"
       ;;
     aarch64 | arm64)
-      broot_url="https://dystroy.org/broot/download/aarch64-linux-android/broot"
+      broot_url="https://dystroy.org/broot/download/aarch64-unknown-linux-gnu/broot"
       ;;
     *)
       warn "Unsupported architecture '$arch' for broot install"
@@ -329,7 +337,10 @@ setup_lazyvim() {
     return 0
   fi
   log "Setting up LazyVim starter"
-  git clone https://github.com/LazyVim/starter "$nvconf"
+  if ! git clone https://github.com/LazyVim/starter "$nvconf"; then
+    warn "Failed to setup LazyVim"
+    return 0
+  fi
   rm -rf "$nvconf/.git"
 }
 
@@ -415,7 +426,7 @@ main() {
   else
     warn "Skipping default shell change because dotfiles install did not run"
   fi
-  install_broot
+  install_broot || warn "broot installation failed; continuing"
   setup_gnome_tools
   log "Bootstrap complete. You may need to log out/in for some changes to take effect."
 }
