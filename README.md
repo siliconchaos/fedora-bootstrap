@@ -5,7 +5,7 @@ Shell script to quickly bootstrap a Fedora system (desktop, server, or WSL). Saf
 ## Run It
 
 ```bash
-git clone <repo-url> fedora-bootstrap
+git clone https://github.com/siliconchaos/fedora-bootstrap.git fedora-bootstrap
 cd fedora-bootstrap
 ./bootstrap.sh
 ```
