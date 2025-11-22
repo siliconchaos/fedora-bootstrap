@@ -10,7 +10,6 @@ ROOT_DIR="$SCRIPT_DIR"
 CONF_FILE="${ROOT_DIR}/config/bootstrap.conf"
 
 # Defaults (can be overridden in bootstrap.conf)
-HEADLESS=${HEADLESS:-false}
 ENABLE_RUST=${ENABLE_RUST:-false}
 ENABLE_FLATPAK=${ENABLE_FLATPAK:-true}
 EXTRA_PACKAGES=("${EXTRA_PACKAGES[@]:-}")
@@ -153,7 +152,7 @@ install_packages() {
   local pkgs=(
     ansible awk awscli2 bash-completion bat btop detox dnf-utils duf fastfetch fd-find fzf glow gum helm jq
     kubernetes-client moreutils ncompress neovim onefetch p7zip p7zip-plugins PackageKit-command-not-found
-    swaks tealdeer tmux unrar uv wget yq zoxide zsh k9s dnfdragora
+    swaks tealdeer tmux unrar uv wget yq zoxide zsh k9s
     git curl ripgrep tree-sitter-cli helix lazygit yazi ouch
   )
   # Merge EXTRA_PACKAGES
@@ -381,13 +380,6 @@ change_default_shell_to_zsh() {
   fi
 }
 
-setup_gnome_tools() {
-  $HEADLESS && {
-    log "HEADLESS=true; skipping GNOME tools"
-    return 0
-  }
-  run_sudo dnf install -y gnome-extensions-app gnome-tweaks || warn "Failed installing GNOME tools"
-}
 
 main() {
   ensure_fedora
@@ -418,7 +410,6 @@ main() {
     warn "Skipping default shell change because dotfiles install did not run"
   fi
   install_broot || warn "broot installation failed; continuing"
-  setup_gnome_tools
   log "Bootstrap complete. You may need to log out/in for some changes to take effect."
 }
 

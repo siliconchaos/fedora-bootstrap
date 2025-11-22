@@ -1,6 +1,6 @@
 # Fedora Bootstrap
 
-Shell script to recreate my Fedora workstation. It is safe to rerun, skips GUI pieces when headless, and adjusts automatically inside containers.
+Shell script to quickly bootstrap a Fedora system (desktop, server, or WSL). Safe to rerun and adjusts automatically for container environments.
 
 ## Run It
 
@@ -27,7 +27,6 @@ cd fedora-bootstrap
 Copy `config/bootstrap.conf.example` to `config/bootstrap.conf` and adjust:
 
 ```bash
-HEADLESS=true          # skip GUI bits
 ENABLE_RUST=true       # install rustup toolchain
 ENABLE_FLATPAK=false   # opt out of Flatpak setup
 EXTRA_PACKAGES=(podman virt-manager)
