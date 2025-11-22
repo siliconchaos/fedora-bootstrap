@@ -8,6 +8,7 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
 ROOT_DIR="$SCRIPT_DIR"
 CONF_FILE="${ROOT_DIR}/config/bootstrap.conf"
+PKG_FILE="${ROOT_DIR}/config/packages.conf"
 
 # Defaults (can be overridden in bootstrap.conf)
 ENABLE_RUST=${ENABLE_RUST:-false}
@@ -31,6 +32,13 @@ load_conf() {
   if [[ -f "$CONF_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$CONF_FILE"
+  fi
+}
+
+load_packages() {
+  if [[ -f "$PKG_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$PKG_FILE"
   fi
 }
 
@@ -118,8 +126,6 @@ install_dev_tools_group() {
 }
 
 install_copr_and_extra() {
-  # COPR: lazygit, yazi
-  log "Ensuring COPR repos for lazygit and yazi"
   if ! command -v dnf >/dev/null 2>&1; then
     warn "dnf not found; skipping COPR setup"
     return 0
@@ -133,14 +139,12 @@ install_copr_and_extra() {
       return 0
     }
   fi
-  # lazygit
-  if ! command -v lazygit >/dev/null 2>&1; then
-    run_sudo dnf -y copr enable dejan/lazygit || warn "Could not enable COPR dejan/lazygit"
-  fi
-  # yazi
-  if ! command -v yazi >/dev/null 2>&1; then
-    run_sudo dnf -y copr enable varlad/yazi || warn "Could not enable COPR varlad/yazi"
-  fi
+
+  # Enable COPR repos from packages.conf
+  for repo in "${COPR_REPOS[@]:-}"; do
+    log "Enabling COPR repo: $repo"
+    run_sudo dnf -y copr enable "$repo" || warn "Could not enable COPR $repo"
+  done
 }
 
 install_packages() {
@@ -148,14 +152,9 @@ install_packages() {
     warn "dnf not found; cannot install packages"
     return 0
   fi
-  # Base package list
-  local pkgs=(
-    ansible awk awscli2 bash-completion bat btop detox dnf-utils duf fastfetch fd-find fzf glow gum helm jq
-    kubernetes-client moreutils ncompress neovim onefetch p7zip p7zip-plugins PackageKit-command-not-found
-    swaks tealdeer tmux unrar uv wget yq zoxide zsh k9s
-    git curl ripgrep tree-sitter-cli helix lazygit yazi ouch
-  )
-  # Merge EXTRA_PACKAGES
+  # Get package list from packages.conf
+  local pkgs=("${DNF_ALL[@]:-}")
+  # Merge EXTRA_PACKAGES from bootstrap.conf
   pkgs+=("${EXTRA_PACKAGES[@]:-}")
   # Install missing packages
   local to_install=()
@@ -215,17 +214,15 @@ install_dra_tools() {
     return 0
   fi
 
-  # Install eza using dra (much faster than cargo)
-  if ! command -v eza >/dev/null 2>&1; then
-    log "Installing eza via dra"
-    dra download --install --output ~/.local/bin -a eza-community/eza || warn "Failed to install eza via dra"
-  fi
-
-  # Install starship using dra
-  if ! command -v starship >/dev/null 2>&1; then
-    log "Installing starship via dra"
-    dra download --install --output ~/.local/bin -a starship/starship || warn "Failed to install starship via dra"
-  fi
+  # Install tools defined in DRA_TOOLS array from packages.conf
+  for tool_repo in "${DRA_TOOLS[@]:-}"; do
+    local tool_name
+    tool_name="${tool_repo##*/}"  # Extract repo name as tool name
+    if ! command -v "$tool_name" >/dev/null 2>&1; then
+      log "Installing $tool_name via dra"
+      dra download --install --output ~/.local/bin -a "$tool_repo" || warn "Failed to install $tool_name via dra"
+    fi
+  done
 }
 
 setup_helix_config() {
@@ -384,6 +381,7 @@ change_default_shell_to_zsh() {
 main() {
   ensure_fedora
   load_conf
+  load_packages
   create_local_bin
   enable_rpmfusion
   enable_flathub
