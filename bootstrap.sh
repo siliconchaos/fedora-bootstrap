@@ -170,11 +170,6 @@ install_packages() {
   fi
 }
 
-# Flatpak apps can be installed manually as needed:
-# flatpak install flathub com.google.Chrome
-# flatpak install flathub org.mozilla.firefox
-# flatpak install flathub com.spotify.Client
-
 install_rust_and_cargo_tools() {
   [[ "$ENABLE_RUST" == true ]] || {
     log "Rust installation disabled (set ENABLE_RUST=true to enable)"
@@ -243,77 +238,6 @@ setup_helix_config() {
   log "Installing Helix config from ${source_conf#$ROOT_DIR/} to ${hx_conf#$HOME/}"
   mkdir -p "$hx_dir"
   cp "$source_conf" "$hx_conf"
-}
-
-install_broot() {
-  local broot_bin="$HOME/.local/bin/broot"
-  local broot_url=""
-  local arch
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64)
-      broot_url="https://dystroy.org/broot/download/x86_64-linux/broot"
-      ;;
-    aarch64 | arm64)
-      broot_url="https://dystroy.org/broot/download/aarch64-unknown-linux-gnu/broot"
-      ;;
-    *)
-      warn "Unsupported architecture '$arch' for broot install"
-      return 1
-      ;;
-  esac
-
-  if [[ ! -x "$broot_bin" ]]; then
-    log "Installing broot to $broot_bin"
-    if curl -L --fail "$broot_url" -o "$broot_bin"; then
-      chmod +x "$broot_bin"
-    else
-      warn "Failed to download broot binary"
-      rm -f "$broot_bin"
-      return 1
-    fi
-  else
-    log "broot already present at $broot_bin"
-  fi
-
-  local broot_cmd
-  if broot_cmd=$(command -v broot 2>/dev/null); then
-    :
-  elif [[ -x "$broot_bin" ]]; then
-    broot_cmd="$broot_bin"
-  else
-    warn "broot binary not found after installation; skipping shell integration"
-    return 1
-  fi
-
-  local target_file marker shell_function
-  local shell_post="$HOME/.shell_post"
-  marker="# >>> fedora-bootstrap broot integration >>>"
-  if [[ -f "$shell_post" ]]; then
-    target_file="$shell_post"
-  else
-    target_file="$HOME/.zshrc"
-  fi
-
-  if [[ -f "$target_file" ]] && grep -Fq "$marker" "$target_file"; then
-    log "broot shell function already present in ${target_file#$HOME/}"
-  else
-    if ! shell_function="$("$broot_cmd" --print-shell-function zsh)"; then
-      warn "Unable to retrieve broot shell function"
-      return 1
-    fi
-    log "Adding broot shell function to ${target_file#$HOME/}"
-    {
-      echo ""
-      echo "$marker"
-      printf '%s\n' "$shell_function"
-      echo "# <<< fedora-bootstrap broot integration <<<"
-    } >>"$target_file"
-  fi
-
-  if ! "$broot_cmd" --set-install-state installed >/dev/null 2>&1; then
-    warn "Could not set broot install state"
-  fi
 }
 
 setup_lazyvim() {
@@ -407,7 +331,6 @@ main() {
   else
     warn "Skipping default shell change because dotfiles install did not run"
   fi
-  install_broot || warn "broot installation failed; continuing"
   log "Bootstrap complete. You may need to log out/in for some changes to take effect."
 }
 
